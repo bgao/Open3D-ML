@@ -26,8 +26,10 @@ from functools import partial
 
 from open3d.ml.torch.ops import nms
 
+from typing import List, Optional
 
-def get_paddings_indicator(actual_num, max_num, axis=0):
+
+def get_paddings_indicator(actual_num, max_num:int, axis:int=0):
     """Create boolean mask by actually number of a padded tensor.
 
     Args:
@@ -50,7 +52,7 @@ def get_paddings_indicator(actual_num, max_num, axis=0):
     return paddings_indicator
 
 
-def limit_period(val, offset=0.5, period=np.pi):
+def limit_period(val, offset:float=0.5, period:float=np.pi):
     """Limit the value into a period for periodic function.
 
     Args:
@@ -125,7 +127,7 @@ def box3d_to_bev2d(boxes3d):
     bev_boxes = torch.cat([centers - dims / 2, centers + dims / 2], dim=-1)
     return bev_boxes
 
-
+@torch.jit.script
 class Anchor3DRangeGenerator(object):
     """3D Anchor Generator by range.
 
@@ -141,9 +143,15 @@ class Anchor3DRangeGenerator(object):
     """
 
     def __init__(self,
-                 ranges,
-                 sizes=[[1.6, 3.9, 1.56]],
-                 rotations=[0, 1.5707963]):
+                 ranges:List[List[float]],
+                 sizes:Optional[List[List[float]]] = None,
+                 rotations:Optional[List[float]] = None):
+
+        if sizes is None or len(sizes) == 0:
+            sizes = [[1.6, 3.9, 1.56]]
+
+        if rotations is None or len(rotations) == 0:
+            rotations = [.0, 1.5707963]
 
         if len(sizes) != len(ranges):
             assert len(ranges) == 1
@@ -153,6 +161,7 @@ class Anchor3DRangeGenerator(object):
         self.sizes = sizes
         self.ranges = ranges
         self.rotations = rotations
+        self.device = "cpu"
 
     @property
     def num_base_anchors(self):
@@ -161,15 +170,13 @@ class Anchor3DRangeGenerator(object):
         num_size = torch.tensor(self.sizes).reshape(-1, 3).size(0)
         return num_rot * num_size
 
-    def grid_anchors(self, featmap_size, device='cuda'):
+    def grid_anchors(self, featmap_size:List[int]):
         """Generate grid anchors of a single level feature map.
 
         This function is usually called by method ``self.grid_anchors``.
 
         Args:
             featmap_size (tuple[int]): Size of the feature map.
-            device (str, optional): Device the tensor will be put on.
-                Defaults to 'cuda'.
 
         Returns:
             torch.Tensor: Anchors in the overall feature map.
@@ -180,18 +187,14 @@ class Anchor3DRangeGenerator(object):
             mr_anchors.append(
                 self.anchors_single_range(featmap_size,
                                           anchor_range,
-                                          anchor_size,
-                                          self.rotations,
-                                          device=device))
+                                          anchor_size))
         mr_anchors = torch.cat(mr_anchors, dim=-3)
         return mr_anchors
 
     def anchors_single_range(self,
-                             feature_size,
-                             anchor_range,
-                             sizes=[[1.6, 3.9, 1.56]],
-                             rotations=[0, 1.5707963],
-                             device='cuda'):
+                             feature_size:List[int],
+                             anchor_range:List[float],
+                             sizes:Optional[List[float]] = None):
         """Generate anchors in a single range.
 
         Args:
@@ -210,23 +213,26 @@ class Anchor3DRangeGenerator(object):
             torch.Tensor: Anchors with shape \
                 [*feature_size, num_sizes, num_rots, 7].
         """
+        if sizes is None or len(sizes) == 0:
+            sizes = [1.6, 3.9, 1.56]
         if len(feature_size) == 2:
             feature_size = [1, feature_size[0], feature_size[1]]
-        anchor_range = torch.tensor(anchor_range, device=device)
+        anchor_range = torch.tensor(anchor_range, device=self.device)
         z_centers = torch.linspace(anchor_range[2],
                                    anchor_range[5],
                                    feature_size[0],
-                                   device=device)
+                                   device=self.device)
         y_centers = torch.linspace(anchor_range[1],
                                    anchor_range[4],
                                    feature_size[1],
-                                   device=device)
+                                   device=self.device)
         x_centers = torch.linspace(anchor_range[0],
                                    anchor_range[3],
                                    feature_size[2],
-                                   device=device)
-        sizes = torch.tensor(sizes, device=device).reshape(-1, 3)
-        rotations = torch.tensor(rotations, device=device)
+                                   device=self.device)
+        sizes = torch.tensor(sizes, device=self.device).reshape(-1, 3)
+        # sizes = torch.tensor(sizes).reshape(-1, 3)
+        rotations = torch.tensor(self.rotations, device=self.device)
 
         # torch.meshgrid default behavior is 'id', np's default is 'xy'
         rets = torch.meshgrid(x_centers, y_centers, z_centers, rotations)
@@ -245,7 +251,7 @@ class Anchor3DRangeGenerator(object):
         # [1, 200, 176, N, 2, 7] for kitti after permute
         return ret
 
-
+@torch.jit.script
 class BBoxCoder(object):
     """Bbox Coder for 3D boxes.
 
@@ -254,10 +260,11 @@ class BBoxCoder(object):
     """
 
     def __init__(self):
-        super(BBoxCoder, self).__init__()
+        pass
+        # super(BBoxCoder, self).__init__()
 
-    @staticmethod
-    def encode(src_boxes, dst_boxes):
+    # @staticmethod
+    def encode(self, src_boxes, dst_boxes):
         """Get box regression transformation deltas (dx, dy, dz, dw, dh, dl,
         dr, dv*) that can be used to transform the `src_boxes` into the
         `target_boxes`.
@@ -284,8 +291,8 @@ class BBoxCoder(object):
         rt = rg - ra
         return torch.cat([xt, yt, zt, wt, lt, ht, rt], dim=-1)
 
-    @staticmethod
-    def decode(anchors, deltas):
+    # @staticmethod
+    def decode(self, anchors, deltas):
         """Apply transformation `deltas` (dx, dy, dz, dw, dh, dl, dr, dv*) to
         `boxes`.
 
@@ -314,7 +321,7 @@ class BBoxCoder(object):
         return torch.cat([xg, yg, zg, wg, lg, hg, rg], dim=-1)
 
 
-def multiclass_nms(boxes, scores, score_thr):
+def multiclass_nms(boxes, scores, score_thr:float):
     """Multi-class nms for 3D boxes.
 
     Args:

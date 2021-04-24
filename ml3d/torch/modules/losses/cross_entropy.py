@@ -1,9 +1,9 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from typing import Optional
 
-
-def one_hot(index, classes):
+def one_hot(index, classes:int):
     out_idx = torch.arange(classes, device=index.device)
     out_idx = torch.unsqueeze(out_idx, 0)
     index = torch.unsqueeze(index, -1)
@@ -21,7 +21,7 @@ class CrossEntropyLoss(nn.Module):
         super(CrossEntropyLoss, self).__init__()
         self.loss_weight = loss_weight
 
-    def forward(self, cls_score, label, weight=None, avg_factor=None, **kwargs):
+    def forward(self, cls_score, label, weight: Optional[torch.Tensor]=None, avg_factor: int = 0):
         """Forward function.
 
         Args:

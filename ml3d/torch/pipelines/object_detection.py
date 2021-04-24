@@ -105,7 +105,7 @@ class ObjectDetection(BasePipeline):
 
         pred = []
         with torch.no_grad():
-            for i in tqdm(range(len(test_split)), desc='testing'):
+            for i in range(10): # tqdm(range(len(test_split)), desc='testing'):
                 results = self.run_inference(test_split[i]['data'])
                 pred.append(results[0])
 

@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-
+from typing import Optional
 
 class SmoothL1Loss(nn.Module):
     """Smooth L1 loss.
@@ -18,7 +18,7 @@ class SmoothL1Loss(nn.Module):
         self.beta = beta
         self.loss_weight = loss_weight
 
-    def forward(self, pred, target, weight=None, avg_factor=None, **kwargs):
+    def forward(self, pred, target, weight: Optional[torch.Tensor]=None, avg_factor: int = 0):
         """Forward function.
 
         Args:

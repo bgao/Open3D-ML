@@ -2,9 +2,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
+from typing import Optional
 
-
-def one_hot(index, classes):
+def one_hot(index, classes:int):
     out_idx = torch.arange(classes, device=index.device)
     out_idx = torch.unsqueeze(out_idx, 0)
     index = torch.unsqueeze(index, -1)
@@ -28,7 +28,7 @@ class FocalLoss(nn.Module):
         self.alpha = alpha
         self.loss_weight = loss_weight
 
-    def forward(self, pred, target, weight=None, avg_factor=None):
+    def forward(self, pred, target, weight: Optional[torch.Tensor]=None, avg_factor: int = 0):
 
         pred_sigmoid = pred.sigmoid()
 

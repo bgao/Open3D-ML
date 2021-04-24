@@ -22,12 +22,12 @@
 import torch
 import pickle
 from torch import nn
-from torch.nn import functional as F
 from torch.nn.modules.utils import _pair
 
 from functools import partial
 import numpy as np
 import os
+from typing import Optional, List, Tuple
 
 from open3d.ml.torch.ops import voxelize, ragged_to_dense
 
@@ -41,6 +41,14 @@ from ..modules.losses.cross_entropy import CrossEntropyLoss
 from ...datasets.utils import ObjdetAugmentation, BEVBox3D
 from ...datasets.utils.operations import filter_by_min_points
 
+@torch.jit.script
+class InferenceResult():
+    def __init__(self, name: str, pos, dim, yaw, score):
+        self.name = name
+        self.pos = pos
+        self.dim = dim
+        self.yaw = yaw
+        self.score = score
 
 class PointPillars(BaseModel):
     """Object detection model. 
@@ -124,7 +132,7 @@ class PointPillars(BaseModel):
         num_points = torch.cat(num_points, dim=0)
         coors_batch = []
         for i, coor in enumerate(coors):
-            coor_pad = F.pad(coor, (1, 0), mode='constant', value=i)
+            coor_pad = torch.nn.functional.pad(coor, (1, 0), mode='constant', value=float(i))
             coors_batch.append(coor_pad)
         coors_batch = torch.cat(coors_batch, dim=0)
         return voxels, num_points, coors_batch
@@ -324,7 +332,7 @@ class PointPillars(BaseModel):
 
             for bbox, score, label in zip(bboxes, scores, labels):
                 dim = bbox[[3, 5, 4]]
-                pos = bbox[:3] + [0, 0, dim[1] / 2]
+                pos = bbox[:3] + [0., 0., dim[1] / 2]
                 yaw = bbox[-1]
                 name = self.lbl2name.get(label, "ignore")
                 inference_result[-1].append(
@@ -332,6 +340,28 @@ class PointPillars(BaseModel):
 
         return inference_result
 
+    @torch.jit.export
+    def get_inference_result(self, inputs, results: Tuple[torch.Tensor, torch.Tensor, torch.Tensor]):
+        print("Iterate each pointcloud")
+        bboxes_b, scores_b, labels_b = self.bbox_head.get_bboxes(*results)
+
+        inference_result:List[List[InferenceResult]] = []
+
+        for _bboxes, _scores, _labels in zip(bboxes_b, scores_b, labels_b):
+            result:List[InferenceResult] = []
+            print("Iterate each box")
+
+            for bbox, score, label in zip(_bboxes, _scores, _labels):
+                dim = bbox[[3, 5, 4]]
+                z = dim[1].item() / 2.
+                pos = bbox[:3] + torch.tensor([0., 0., z])
+                yaw = bbox[-1]
+                name = self.lbl2name.get(label, "ignore")
+                result.append(InferenceResult(name, pos, dim, yaw, score))
+
+            inference_result.append(result)
+
+        return inference_result
 
 MODEL._register_module(PointPillars, 'torch')
 
@@ -440,7 +470,7 @@ class PFNLayer(nn.Module):
         self.mode = mode
 
     #@auto_fp16(apply_to=('inputs'), out_fp32=True)
-    def forward(self, inputs, num_voxels=None, aligned_distance=None):
+    def forward(self, inputs, num_voxels: Optional[torch.Tensor]=None, aligned_distance: Optional[torch.Tensor]=None):
         """Forward function.
 
         Args:
@@ -458,18 +488,19 @@ class PFNLayer(nn.Module):
         x = self.linear(inputs)
         x = self.norm(x.permute(0, 2, 1).contiguous()).permute(0, 2,
                                                                1).contiguous()
-        x = F.relu(x)
+        x = torch.nn.functional.relu(x)
 
         if self.mode == 'max':
             if aligned_distance is not None:
                 x = x.mul(aligned_distance.unsqueeze(-1))
             x_max = torch.max(x, dim=1, keepdim=True)[0]
-        elif self.mode == 'avg':
+        # elif self.mode == 'avg':
+        else:
             if aligned_distance is not None:
                 x = x.mul(aligned_distance.unsqueeze(-1))
-            x_max = x.sum(dim=1,
-                          keepdim=True) / num_voxels.type_as(inputs).view(
-                              -1, 1, 1)
+            x_max = x.sum(dim=1, keepdim=True)
+            if num_voxels is not None:
+                x_max = x_max / num_voxels.type_as(inputs).view(-1, 1, 1)
 
         if self.last_vfe:
             return x_max
@@ -600,7 +631,7 @@ class PointPillarsScatter(nn.Module):
         self.fp16_enabled = False
 
     #@auto_fp16(apply_to=('voxel_features', ))
-    def forward(self, voxel_features, coors, batch_size):
+    def forward(self, voxel_features, coors, batch_size:int):
         """Scatter features of single sample.
 
         Args:
@@ -620,11 +651,27 @@ class PointPillarsScatter(nn.Module):
 
             # Only include non-empty pillars
             batch_mask = coors[:, 0] == batch_itt
-            this_coors = coors[batch_mask, :]
+            # this_coors = coors[batch_mask, :]
+            this_coors = coors
             indices = this_coors[:, 2] * self.nx + this_coors[:, 3]
-            indices = indices.type(torch.long)
-            voxels = voxel_features[batch_mask, :]
+            indices = indices.to(torch.long)
+            # voxels = voxel_features[batch_mask, :]
+            voxels = voxel_features
             voxels = voxels.t()
+
+            # print("batch_mask", batch_mask)
+            # print("coors", coors)
+            # print("this_coors", this_coors)
+            # print("indices", indices)
+
+            # print("voxel_features.size = ", voxel_features.size())
+            # print("coors.size = ", coors.size())
+            # print("batch_itt = ", batch_itt)
+            # print("canvas.size = ", canvas.size())
+            # print("batch_mask.size = ", batch_mask.size())
+            # print("this_coors.size = ", this_coors.size())
+            # print("indices.size = ", indices.size())
+            # print("voxels.size = ", voxels.size())
 
             # Now scatter the blob back to the canvas.
             canvas[:, indices] = voxels
@@ -702,10 +749,12 @@ class SECOND(nn.Module):
             tuple[torch.Tensor]: Multi-scale features.
         """
         outs = []
-        for i in range(len(self.blocks)):
-            x = self.blocks[i](x)
+        for i, b in enumerate(self.blocks):
+            x = b(x)
             outs.append(x)
-        return tuple(outs)
+            # print(x.size())
+
+        return outs
 
 
 class SECONDFPN(nn.Module):
@@ -762,11 +811,11 @@ class SECONDFPN(nn.Module):
             if isinstance(m, nn.Conv2d):
                 nn.init.kaiming_normal_(m.weight, mode='fan_out')
 
-    def forward(self, x):
+    def forward(self, x: List[torch.Tensor]):
         """Forward function.
 
         Args:
-            x (torch.Tensor): 4D Tensor in (N, C, H, W) shape.
+            x [torch.Tensor]: 4D Tensor in (N, C, H, W) shape.
 
         Returns:
             torch.Tensor: Feature maps.
@@ -779,7 +828,6 @@ class SECONDFPN(nn.Module):
         else:
             out = ups[0]
         return out
-
 
 class Anchor3DHead(nn.Module):
 
@@ -881,8 +929,8 @@ class Anchor3DHead(nn.Module):
         """
 
         # compute all anchors
-        anchors = self.anchor_generator.grid_anchors(pred_bboxes.shape[-2:],
-                                                     device=pred_bboxes.device)
+        anchors = self.anchor_generator.grid_anchors(pred_bboxes.shape[-2:])
+                                                     # device=pred_bboxes.device)
 
         rot_angles = anchors[0].shape[-2]
 
@@ -973,8 +1021,8 @@ class Anchor3DHead(nn.Module):
         assert cls_scores.size()[-2:] == bbox_preds.size()[-2:]
         assert cls_scores.size()[-2:] == dir_preds.size()[-2:]
 
-        anchors = self.anchor_generator.grid_anchors(cls_scores.shape[-2:],
-                                                     device=cls_scores.device)
+        anchors = self.anchor_generator.grid_anchors(cls_scores.shape[-2:])
+                                                     # device=cls_scores.device)
         anchors = anchors.reshape(-1, self.box_code_size)
 
         dir_preds = dir_preds.permute(1, 2, 0).reshape(-1, 2)
@@ -1011,7 +1059,7 @@ class Anchor3DHead(nn.Module):
         dir_scores = dir_scores[idxs]
 
         if bboxes.shape[0] > 0:
-            dir_rot = limit_period(bboxes[..., 6] - self.dir_offset, 1, np.pi)
+            dir_rot = limit_period(bboxes[..., 6] - self.dir_offset, 1., np.pi)
             bboxes[..., 6] = (dir_rot + self.dir_offset +
                               np.pi * dir_scores.to(bboxes.dtype))
 

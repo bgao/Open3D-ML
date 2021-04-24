@@ -124,6 +124,11 @@ def main():
         'pipeline': pprint.pformat(cfg_dict_pipeline, indent=2)
     }
 
+    if ('save' in extra_dict) and extra_dict['save']:
+        import torch
+        sm = torch.jit.script(model)
+        sm.save('logs/pointpillars.pt')
+
     if args.split == 'test':
         pipeline.run_test()
     else:
