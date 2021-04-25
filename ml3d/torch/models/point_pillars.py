@@ -162,7 +162,7 @@ class PointPillars(BaseModel):
             (0, 2, 3, 1)).reshape(-1, self.bbox_head.num_classes)
         target_labels = torch.full((scores.size(0),),
                                    self.bbox_head.num_classes,
-                                   device=scores.device,
+                                   device=scores.device.type,
                                    dtype=gt_labels.dtype)
         target_labels[pos_idx] = gt_labels[target_idx]
 
@@ -929,8 +929,8 @@ class Anchor3DHead(nn.Module):
         """
 
         # compute all anchors
-        anchors = self.anchor_generator.grid_anchors(pred_bboxes.shape[-2:])
-                                                     # device=pred_bboxes.device)
+        anchors = self.anchor_generator.grid_anchors(pred_bboxes.shape[-2:],
+                                                     device=pred_bboxes.device.type)
 
         rot_angles = anchors[0].shape[-2]
 
@@ -1021,8 +1021,8 @@ class Anchor3DHead(nn.Module):
         assert cls_scores.size()[-2:] == bbox_preds.size()[-2:]
         assert cls_scores.size()[-2:] == dir_preds.size()[-2:]
 
-        anchors = self.anchor_generator.grid_anchors(cls_scores.shape[-2:])
-                                                     # device=cls_scores.device)
+        anchors = self.anchor_generator.grid_anchors(cls_scores.shape[-2:],
+                                                     device=cls_scores.device.type)
         anchors = anchors.reshape(-1, self.box_code_size)
 
         dir_preds = dir_preds.permute(1, 2, 0).reshape(-1, 2)

@@ -161,7 +161,6 @@ class Anchor3DRangeGenerator(object):
         self.sizes = sizes
         self.ranges = ranges
         self.rotations = rotations
-        self.device = "cpu"
 
     @property
     def num_base_anchors(self):
@@ -170,13 +169,15 @@ class Anchor3DRangeGenerator(object):
         num_size = torch.tensor(self.sizes).reshape(-1, 3).size(0)
         return num_rot * num_size
 
-    def grid_anchors(self, featmap_size:List[int]):
+    def grid_anchors(self, featmap_size:List[int], device:str='cuda'):
         """Generate grid anchors of a single level feature map.
 
         This function is usually called by method ``self.grid_anchors``.
 
         Args:
             featmap_size (tuple[int]): Size of the feature map.
+            device (str, optional): Device the tensor will be put on.
+                Defaults to 'cuda'.
 
         Returns:
             torch.Tensor: Anchors in the overall feature map.
@@ -187,14 +188,16 @@ class Anchor3DRangeGenerator(object):
             mr_anchors.append(
                 self.anchors_single_range(featmap_size,
                                           anchor_range,
-                                          anchor_size))
+                                          anchor_size,
+                                          device = device))
         mr_anchors = torch.cat(mr_anchors, dim=-3)
         return mr_anchors
 
     def anchors_single_range(self,
                              feature_size:List[int],
                              anchor_range:List[float],
-                             sizes:Optional[List[float]] = None):
+                             sizes:Optional[List[float]] = None,
+                             device:str = 'cuda'):
         """Generate anchors in a single range.
 
         Args:
@@ -217,22 +220,21 @@ class Anchor3DRangeGenerator(object):
             sizes = [1.6, 3.9, 1.56]
         if len(feature_size) == 2:
             feature_size = [1, feature_size[0], feature_size[1]]
-        anchor_range = torch.tensor(anchor_range, device=self.device)
+        anchor_range = torch.tensor(anchor_range, device=device)
         z_centers = torch.linspace(anchor_range[2],
                                    anchor_range[5],
                                    feature_size[0],
-                                   device=self.device)
+                                   device=device)
         y_centers = torch.linspace(anchor_range[1],
                                    anchor_range[4],
                                    feature_size[1],
-                                   device=self.device)
+                                   device=device)
         x_centers = torch.linspace(anchor_range[0],
                                    anchor_range[3],
                                    feature_size[2],
-                                   device=self.device)
-        sizes = torch.tensor(sizes, device=self.device).reshape(-1, 3)
-        # sizes = torch.tensor(sizes).reshape(-1, 3)
-        rotations = torch.tensor(self.rotations, device=self.device)
+                                   device=device)
+        sizes = torch.tensor(sizes, device=device).reshape(-1, 3)
+        rotations = torch.tensor(self.rotations, device=device)
 
         # torch.meshgrid default behavior is 'id', np's default is 'xy'
         rets = torch.meshgrid(x_centers, y_centers, z_centers, rotations)

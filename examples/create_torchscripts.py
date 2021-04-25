@@ -10,7 +10,7 @@ cfg = _ml3d.utils.Config.load_from_file(cfg_file)
 model = ml3d.models.PointPillars(**cfg.model)
 cfg.dataset['dataset_path'] = "/home/bgao/onet/src/lidar/dataset/Kitti"
 dataset = ml3d.datasets.KITTI(cfg.dataset.pop('dataset_path', None), **cfg.dataset)
-pipeline = ml3d.pipelines.ObjectDetection(model, dataset=dataset, device="cpu", **cfg.pipeline)
+pipeline = ml3d.pipelines.ObjectDetection(model, dataset=dataset, device="cuda", **cfg.pipeline)
 
 # download the weights.
 ckpt_folder = "./logs/"
