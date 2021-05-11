@@ -3,6 +3,8 @@ import logging
 from tqdm import tqdm
 import numpy as np
 import re
+import subprocess
+import time
 
 from datetime import datetime
 
@@ -25,7 +27,6 @@ logging.basicConfig(
     format='%(levelname)s - %(asctime)s - %(module)s - %(message)s',
 )
 log = logging.getLogger(__name__)
-
 
 class ObjectDetection(BasePipeline):
     """
@@ -285,8 +286,15 @@ class ObjectDetection(BasePipeline):
 
             self.save_logs(writer, epoch)
 
+            # log temperature
+            # the system temperature could get too high and cause system failure
+            # so sleep for 10 minutes after each checkpoint (=5 epochs)
+            log.info(subprocess.check_output(["date", "+%D, %T"]).decode('utf-8'))
+            log.info(subprocess.check_output(["sensors"]).decode('utf-8'))
+
             if epoch % cfg.save_ckpt_freq == 0:
                 self.save_ckpt(epoch)
+                time.sleep(60*10) # 10 minutes
 
     def save_logs(self, writer, epoch):
         for key, val in self.losses.items():
