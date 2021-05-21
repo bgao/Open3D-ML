@@ -98,7 +98,8 @@ def box3d_to_bev(boxes3d):
     Returns:
         torch.Tensor: Converted BEV boxes in XYWHR format.
     """
-    return boxes3d[:, [0, 1, 3, 4, 6]]
+    idx = torch.tensor([0, 1, 3, 4, 6])
+    return boxes3d[:, idx]
 
 
 def box3d_to_bev2d(boxes3d):
@@ -119,7 +120,8 @@ def box3d_to_bev2d(boxes3d):
 
     # find the center of boxes
     conditions = (normed_rotations > np.pi / 4)[..., None]
-    bboxes_xywh = torch.where(conditions, bev_rotated_boxes[:, [0, 1, 3, 2]],
+    idx = torch.tensor([0, 1, 3, 4, 6])
+    bboxes_xywh = torch.where(conditions, bev_rotated_boxes[:, idx],
                               bev_rotated_boxes[:, :4])
 
     centers = bboxes_xywh[:, :2]
@@ -339,12 +341,12 @@ def multiclass_nms(boxes, scores, score_thr:float):
             with an entry for each class.
     """
 
-    idxs = []
+    idxs = torch.jit.annotate(List[torch.Tensor], [])
     for i in range(scores.shape[1]):
         cls_inds = scores[:, i] > score_thr
         if not cls_inds.any():
-            idxs.append(
-                torch.tensor([], dtype=torch.long, device=cls_inds.device))
+            placeholder = torch.jit.annotate(List[int], [])
+            idxs.append(torch.tensor(placeholder, dtype=torch.long, device=cls_inds.device))
             continue
 
         orig_idx = torch.arange(cls_inds.shape[0],

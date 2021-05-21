@@ -41,15 +41,6 @@ from ..modules.losses.cross_entropy import CrossEntropyLoss
 from ...datasets.utils import ObjdetAugmentation, BEVBox3D
 from ...datasets.utils.operations import filter_by_min_points
 
-@torch.jit.script
-class InferenceResult():
-    def __init__(self, name: str, pos, dim, yaw, score):
-        self.name = name
-        self.pos = pos
-        self.dim = dim
-        self.yaw = yaw
-        self.score = score
-
 class PointPillars(BaseModel):
     """Object detection model. 
     Based on the PointPillars architecture 
@@ -341,25 +332,19 @@ class PointPillars(BaseModel):
         return inference_result
 
     @torch.jit.export
-    def get_inference_result(self, inputs, results: Tuple[torch.Tensor, torch.Tensor, torch.Tensor]):
-        print("Iterate each pointcloud")
+    def get_inference_result(self, results: Tuple[torch.Tensor, torch.Tensor, torch.Tensor]):
         bboxes_b, scores_b, labels_b = self.bbox_head.get_bboxes(*results)
 
-        inference_result:List[List[InferenceResult]] = []
+        inference_result:List[Tuple[str, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]] = []
 
         for _bboxes, _scores, _labels in zip(bboxes_b, scores_b, labels_b):
-            result:List[InferenceResult] = []
-            print("Iterate each box")
-
             for bbox, score, label in zip(_bboxes, _scores, _labels):
                 dim = bbox[[3, 5, 4]]
                 z = dim[1].item() / 2.
                 pos = bbox[:3] + torch.tensor([0., 0., z])
                 yaw = bbox[-1]
                 name = self.lbl2name.get(label, "ignore")
-                result.append(InferenceResult(name, pos, dim, yaw, score))
-
-            inference_result.append(result)
+                inference_result.append((name, pos, dim, yaw, score))
 
         return inference_result
 
@@ -431,7 +416,8 @@ class PointPillarsVoxelization(torch.nn.Module):
             self.max_num_points, torch.tensor(-1)) + 1
 
         out_voxels = feats[voxels_point_indices_dense]
-        out_coords = ans.voxel_coords[:, [2, 1, 0]].contiguous()
+        idx = torch.tensor([2, 1, 0])
+        out_coords = ans.voxel_coords[:, idx].contiguous()
         out_num_points = ans.voxel_point_row_splits[
             1:] - ans.voxel_point_row_splits[:-1]
 
